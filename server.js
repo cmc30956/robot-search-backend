@@ -114,13 +114,8 @@ app.get('/api/search', async (req, res) => {
   if (source === 'All' || source === 'Hugging Face') {
     const huggingFaceParams = {
       limit: 50,
-      pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
+      search: query || 'robot', // Use 'robot' as a fallback search term
     };
-    
-    // Only use the search parameter if the user has entered a query
-    if (query) {
-        huggingFaceParams.search = query;
-    }
 
     if (sort === 'growth_week' || sort === 'growth_month') {
       huggingFaceParams.sort = 'lastUpdated';
