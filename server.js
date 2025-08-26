@@ -2,24 +2,24 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const Fuse = require('fuse.js'); // 用于实现模糊搜索
+const Fuse = require('fuse.js'); // For fuzzy searching
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// 使用 CORS 中间件来允许跨域请求
+// Use CORS middleware to allow cross-origin requests
 app.use(cors());
 
-// GitHub API 的基本 URL
+// GitHub API base URL
 const GITHUB_API_URL = 'https://api.github.com/search/repositories';
 
-// Hugging Face API 的基本 URL
+// Hugging Face API base URL
 const HUGGING_FACE_API_URL = 'https://huggingface.co/api/models';
 
 /**
- * 将 GitHub 项目数据标准化为统一的格式。
- * @param {object} item - GitHub API 返回的单个项目。
- * @returns {object} - 标准化后的项目对象。
+ * Standardizes GitHub project data into a consistent format.
+ * @param {object} item - A single project returned by the GitHub API.
+ * @returns {object} - The standardized project object.
  */
 const standardizeGithubProject = (item) => ({
   id: item.id,
@@ -27,19 +27,19 @@ const standardizeGithubProject = (item) => ({
   description: item.description,
   url: item.html_url,
   source: 'GitHub',
-  tags: item.topics || [], // 使用 topics 作为标签
+  tags: item.topics || [], // Use topics as tags
   stars: item.stargazers_count,
 });
 
 /**
- * 将 Hugging Face 模型数据标准化为统一的格式。
- * @param {object} item - Hugging Face API 返回的单个模型。
- * @returns {object} - 标准化后的模型对象。
+ * Standardizes Hugging Face model data into a consistent format.
+ * @param {object} item - A single model returned by the Hugging Face API.
+ * @returns {object} - The standardized model object.
  */
 const standardizeHuggingFaceModel = (item) => ({
   id: item.id,
   name: item.modelId,
-  description: item.pipeline_tag, // 使用 pipeline_tag 作为描述
+  description: item.pipeline_tag, // Use pipeline_tag as a description
   url: `https://huggingface.co/${item.modelId}`,
   source: 'Hugging Face',
   tags: item.tags || [],
@@ -47,21 +47,20 @@ const standardizeHuggingFaceModel = (item) => ({
 });
 
 /**
- * 主搜索 API 端点。
+ * Main search API endpoint.
  */
 app.get('/api/search', async (req, res) => {
-  const { query, source, tags } = req.query;
+  const { query, source, tags, sort } = req.query;
 
   let allResults = [];
   const searchPromises = [];
 
-  // 如果请求来自 GitHub 或所有来源
+  // If the request is for GitHub or all sources
   if (source === 'All' || source === 'GitHub') {
-    // 构造 GitHub API 请求，使用更灵活的搜索查询
+    // Construct the GitHub API request with a more flexible search query
     searchPromises.push(
       axios.get(GITHUB_API_URL, {
         params: {
-          // 不再使用硬性的 'topic:robotics'，而是将它作为关键词的一部分
           q: `${query || ''} robotics`,
           sort: 'stars',
           per_page: 50,
@@ -77,16 +76,15 @@ app.get('/api/search', async (req, res) => {
     );
   }
 
-  // 如果请求来自 Hugging Face 或所有来源
+  // If the request is for Hugging Face or all sources
   if (source === 'All' || source === 'Hugging Face') {
-    // 构造 Hugging Face API 请求，并使用相关的流水线标签进行过滤
+    // Construct the Hugging Face API request with relevant pipeline tags
     searchPromises.push(
       axios.get(HUGGING_FACE_API_URL, {
         params: {
           search: `${query || ''}`,
           sort: 'downloads',
           limit: 50,
-          // 保持与机器人相关的流水线标签
           pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
         },
       })
@@ -100,26 +98,26 @@ app.get('/api/search', async (req, res) => {
     );
   }
 
-  // 等待所有 API 请求完成
+  // Wait for all API requests to complete
   await Promise.allSettled(searchPromises);
 
-  // Fuse.js 配置，用于模糊搜索
+  // Fuse.js configuration for fuzzy search
   const options = {
     includeScore: true,
     keys: ['name', 'description', 'tags'],
-    threshold: 0.4, // 调整阈值以控制模糊匹配的宽松程度
+    threshold: 0.4, // Adjust threshold for looseness of fuzzy matching
   };
 
   const fuse = new Fuse(allResults, options);
   let finalResults = allResults;
 
-  // 如果有搜索词，则执行模糊搜索
+  // If a search query is provided, perform fuzzy search
   if (query) {
     const fuseResults = fuse.search(query);
     finalResults = fuseResults.map(result => result.item);
   }
 
-  // 如果有标签筛选，则进行筛选
+  // If tags are provided, filter the results
   if (tags && tags.length > 0) {
     const selectedTagsArray = tags.split(',');
     finalResults = finalResults.filter(project =>
@@ -127,17 +125,27 @@ app.get('/api/search', async (req, res) => {
     );
   }
 
-  // 按 stars/downloads 降序排列
-  finalResults.sort((a, b) => {
-    const scoreA = a.stars || a.downloads || 0;
-    const scoreB = b.stars || b.downloads || 0;
-    return scoreB - scoreA;
-  });
+  // Sort logic based on the 'sort' parameter
+  if (sort === 'growth') {
+    // A simple, efficient proxy for growth is sorting by total stars/downloads
+    finalResults.sort((a, b) => {
+      const scoreA = a.stars || a.downloads || 0;
+      const scoreB = b.stars || b.downloads || 0;
+      return scoreB - scoreA;
+    });
+  } else {
+    // Default sorting by stars/downloads in descending order
+    finalResults.sort((a, b) => {
+      const scoreA = a.stars || a.downloads || 0;
+      const scoreB = b.stars || b.downloads || 0;
+      return scoreB - scoreA;
+    });
+  }
 
   res.json(finalResults);
 });
 
-// 启动服务器
+// Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
