@@ -57,12 +57,12 @@ app.get('/api/search', async (req, res) => {
 
   // 如果请求来自 GitHub 或所有来源
   if (source === 'All' || source === 'GitHub') {
-    // 构造 GitHub API 请求，使用更精确的 'topic:robotics' 过滤器
+    // 构造 GitHub API 请求，使用更灵活的搜索查询
     searchPromises.push(
       axios.get(GITHUB_API_URL, {
         params: {
-          // 使用 'topic:robotics' 确保结果与机器人相关，同时保持用户查询
-          q: `topic:robotics ${query || ''}`,
+          // 不再使用硬性的 'topic:robotics'，而是将它作为关键词的一部分
+          q: `${query || ''} robotics`,
           sort: 'stars',
           per_page: 50,
         },
@@ -86,7 +86,7 @@ app.get('/api/search', async (req, res) => {
           search: `${query || ''}`,
           sort: 'downloads',
           limit: 50,
-          // 仅搜索与机器人相关的模型类型
+          // 保持与机器人相关的流水线标签
           pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
         },
       })
