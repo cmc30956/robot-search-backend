@@ -61,25 +61,13 @@ const getDateNDaysAgo = (days) => {
  * Main search API endpoint.
  */
 app.get('/api/search', async (req, res) => {
-  const { query, source, tags, sort, robotType } = req.query;
+  const { query, source, tags, sort } = req.query;
 
   let allResults = [];
   const searchPromises = [];
 
   const date7DaysAgo = getDateNDaysAgo(7);
   const date30DaysAgo = getDateNDaysAgo(30);
-  
-  // Define a map for internal filtering keywords
-  const robotTypeKeywords = {
-    '人型机器人': ['humanoid', 'bipedal'],
-    '移动机器人': ['mobile', 'rover', 'agv', 'navigation'],
-    '机械臂': ['robotic-arm', 'manipulator', 'end-effector'],
-    '足式机器人': ['legged-robot', 'quadrupedal', 'hexapod'],
-    '灵巧手': ['dexterous-hand', 'gripper', 'manipulation'],
-    '桌面机器人': ['desktop-robot', 'tiny-robot'],
-    '宠物机器人': ['pet-robot', 'companion-robot'],
-    '教育机器人': ['educational-robot', 'teaching-robot', 'STEM'],
-  };
 
   // If the request is for GitHub or all sources
   if (source === 'All' || source === 'GitHub') {
@@ -137,7 +125,7 @@ app.get('/api/search', async (req, res) => {
 
   // Wait for all API requests to complete
   await Promise.allSettled(searchPromises);
-  
+
   // Apply a local fuzzy search to the API results to better match the user's query
   const fuseOptions = {
     includeScore: true,
@@ -146,26 +134,11 @@ app.get('/api/search', async (req, res) => {
   };
   const fuse = new Fuse(allResults, fuseOptions);
   let finalResults = allResults;
-  
+
   if (query) {
     const fuseResults = fuse.search(query);
     finalResults = fuseResults.map(result => result.item);
   }
-
-  // Apply internal filtering based on robot type keywords to the filtered results
-  if (robotType && robotType !== 'All' && robotTypeKeywords[robotType]) {
-    const keywords = robotTypeKeywords[robotType];
-    const regex = new RegExp(keywords.join('|'), 'i'); // Case-insensitive regex
-    finalResults = finalResults.filter(project => {
-      // Check name, description, and tags for matching keywords
-      return (
-        (project.name && regex.test(project.name)) ||
-        (project.description && regex.test(project.description)) ||
-        (project.tags && project.tags.some(tag => regex.test(tag)))
-      );
-    });
-  }
-
 
   // If tags are provided, filter the results
   if (tags && tags.length > 0) {
