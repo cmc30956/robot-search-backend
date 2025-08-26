@@ -61,7 +61,7 @@ const getDateNDaysAgo = (days) => {
  * Main search API endpoint.
  */
 app.get('/api/search', async (req, res) => {
-  const { query, source, tags, sort, robotType, level } = req.query;
+  const { query, source, tags, sort, robotType } = req.query;
 
   let allResults = [];
   const searchPromises = [];
@@ -73,14 +73,9 @@ app.get('/api/search', async (req, res) => {
   const getSearchQuery = (baseQuery) => {
     let finalQuery = `${baseQuery || ''}`;
     
-    // Add keywords based on robot type
+    // Add keywords based on specific robot types
     if (robotType) {
-        finalQuery += ` ${robotType}`;
-    }
-
-    // Add keywords based on specific hardware/software levels
-    if (level) {
-      switch (level) {
+      switch (robotType) {
         case '人型机器人':
           finalQuery += ' humanoid OR bipedal';
           break;
@@ -90,19 +85,23 @@ app.get('/api/search', async (req, res) => {
         case '机械臂':
           finalQuery += ' robotic-arm OR manipulator OR end-effector';
           break;
+        case '足式机器人':
+          finalQuery += ' legged-robot OR quadrupedal OR hexapod';
+          break;
         case '灵巧手':
           finalQuery += ' dexterous-hand OR gripper';
           break;
-        case 'VLA模型':
-          finalQuery += ' vla-model OR vision-language-action';
+        case '桌面机器人':
+          finalQuery += ' desktop-robot OR tiny-robot';
           break;
-        case 'RL模型':
-          finalQuery += ' rl-model OR reinforcement-learning';
+        case '宠物机器人':
+          finalQuery += ' pet-robot OR companion-robot';
           break;
-        case 'LLM模型':
-          finalQuery += ' llm-model OR large-language-model';
+        case '教育机器人':
+          finalQuery += ' educational-robot OR teaching-robot';
           break;
         default:
+          // For other or 'All' types, just use the base query
           break;
       }
     }
