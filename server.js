@@ -68,13 +68,6 @@ app.get('/api/search', async (req, res) => {
 
   const date7DaysAgo = getDateNDaysAgo(7);
   const date30DaysAgo = getDateNDaysAgo(30);
-
-  // A helper function to build the base search query for APIs
-  const getSearchQuery = (baseQuery) => {
-    // The user's query is now the core of the search
-    let finalQuery = `${baseQuery || 'robotics'}`; // Use 'robotics' as a fallback
-    return finalQuery.trim();
-  };
   
   // Define a map for internal filtering keywords
   const robotTypeKeywords = {
@@ -90,7 +83,7 @@ app.get('/api/search', async (req, res) => {
 
   // If the request is for GitHub or all sources
   if (source === 'All' || source === 'GitHub') {
-    let githubQuery = getSearchQuery(query);
+    let githubQuery = query || 'robotics'; // Use 'robotics' as a fallback query
     let githubSort = 'stars';
 
     if (sort === 'growth_week') {
@@ -120,10 +113,14 @@ app.get('/api/search', async (req, res) => {
   // If the request is for Hugging Face or all sources
   if (source === 'All' || source === 'Hugging Face') {
     const huggingFaceParams = {
-      search: getSearchQuery(query),
       limit: 50,
       pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
     };
+    
+    // Only use the search parameter if the user has entered a query
+    if (query) {
+        huggingFaceParams.search = query;
+    }
 
     if (sort === 'growth_week' || sort === 'growth_month') {
       huggingFaceParams.sort = 'lastUpdated';
