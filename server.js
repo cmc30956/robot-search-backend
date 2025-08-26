@@ -1,88 +1,132 @@
+// server.js
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
-const path = require('path');
+const cors = require('cors');
+const Fuse = require('fuse.js'); // 用于实现模糊搜索
 
 const app = express();
-const port = 3000;
+const PORT = process.env.PORT || 3001;
 
-// Middleware
+// 使用 CORS 中间件来允许跨域请求
 app.use(cors());
-app.use(express.json());
 
-// Example data from GitHub and Hugging Face to simulate API responses.
-// In a real-world scenario, you would dynamically fetch this data.
-const githubProjects = [
-  { id: 1, full_name: 'alphabot', description: 'A versatile mobile robot platform.', topics: ['robotic-arm', 'C++', 'hardware'] },
-  { id: 2, full_name: 'ROS2', description: 'The next generation of the Robot Operating System.', topics: ['ROS2', 'navigation', 'autonomous'] },
-  { id: 3, full_name: 'OpenCV-Bot', description: 'An educational robot project using OpenCV for computer vision.', topics: ['computer-vision', 'Python', 'OpenCV'] },
-  { id: 4, full_name: 'A-star-Rust', description: 'An efficient A* pathfinding algorithm implementation in Rust.', topics: ['pathfinding', 'Rust', 'algorithm'] },
-  { id: 5, full_name: 'Panda-Robotics', description: 'A framework for robotic arm simulation and control.', topics: ['robotic-arm', 'simulation', 'manipulation'] },
-  { id: 6, full_name: 'Robot-Locomotion', description: 'Research code for bipedal robot locomotion.', topics: ['locomotion', 'bipedal', 'control'] },
-  { id: 7, full_name: 'PyRobot', description: 'A PyTorch-based robotics research platform.', topics: ['robotic-arm', 'learning', 'Python'] }
-];
+// GitHub API 的基本 URL
+const GITHUB_API_URL = 'https://api.github.com/search/repositories';
 
-const huggingfaceModels = [
-  { id: 101, modelId: 'RoboGPT', description: 'A large language model fine-tuned for robotic commands.', tags: ['NLP', 'AI', 'language-model'] },
-  { id: 102, modelId: 'DuoQuad', description: 'A reinforcement learning model for quadcopter control.', tags: ['reinforcement-learning', 'AI', 'quadcopter'] },
-  { id: 103, modelId: 'Mobile-Robotics', description: 'A vision-based model for mobile robot navigation.', tags: ['navigation', 'SLAM', 'AI'] }
-];
+// Hugging Face API 的基本 URL
+const HUGGING_FACE_API_URL = 'https://huggingface.co/api/models';
 
-// Combine all projects into a single array with a unified structure
-const allProjects = [
-  ...githubProjects.map(p => ({
-    id: `gh-${p.id}`,
-    name: p.full_name,
-    description: p.description,
-    tags: p.topics,
-    source: 'GitHub',
-    url: `https://github.com/${p.full_name}`
-  })),
-  ...huggingfaceModels.map(m => ({
-    id: `hf-${m.id}`,
-    name: m.modelId,
-    description: m.description,
-    tags: m.tags,
-    source: 'Hugging Face',
-    url: `https://huggingface.co/${m.modelId}`
-  }))
-];
+/**
+ * 将 GitHub 项目数据标准化为统一的格式。
+ * @param {object} item - GitHub API 返回的单个项目。
+ * @returns {object} - 标准化后的项目对象。
+ */
+const standardizeGithubProject = (item) => ({
+  id: item.id,
+  name: item.full_name,
+  description: item.description,
+  url: item.html_url,
+  source: 'GitHub',
+  tags: item.topics || [], // 使用 topics 作为标签
+});
 
-// Search API endpoint
+/**
+ * 将 Hugging Face 模型数据标准化为统一的格式。
+ * @param {object} item - Hugging Face API 返回的单个模型。
+ * @returns {object} - 标准化后的模型对象。
+ */
+const standardizeHuggingFaceModel = (item) => ({
+  id: item.id,
+  name: item.modelId,
+  description: item.pipeline_tag, // 使用 pipeline_tag 作为描述
+  url: `https://huggingface.co/${item.modelId}`,
+  source: 'Hugging Face',
+  tags: item.tags || [],
+});
+
+/**
+ * 主搜索 API 端点。
+ */
 app.get('/api/search', async (req, res) => {
   const { query, source, tags } = req.query;
-  let filtered = [...allProjects];
 
-  // Filter by source (GitHub, Hugging Face, or all)
-  if (source && source !== 'All') {
-    filtered = filtered.filter(p => p.source === source);
-  }
+  let allResults = [];
+  const searchPromises = [];
 
-  // Filter by tags
-  if (tags) {
-    const selectedTags = tags.split(',').map(tag => tag.toLowerCase().trim());
-    filtered = filtered.filter(p => p.tags.some(tag => selectedTags.includes(tag.toLowerCase())));
-  }
-
-  // Filter by query (case-insensitive search in name and description)
-  if (query) {
-    const lowerQuery = query.toLowerCase();
-    filtered = filtered.filter(p =>
-      p.name.toLowerCase().includes(lowerQuery) ||
-      p.description.toLowerCase().includes(lowerQuery)
+  // 如果请求来自 GitHub 或所有来源
+  if (source === 'All' || source === 'GitHub') {
+    // 构造 GitHub API 请求
+    searchPromises.push(
+      axios.get(GITHUB_API_URL, {
+        params: {
+          q: `robotics ${query || ''}`, // 增加 "robotics" 关键词以确保结果相关
+          sort: 'stars', // 按 star 数量排序
+          per_page: 50, // 获取更多结果以进行本地筛选
+        },
+      })
+      .then(response => {
+        const githubProjects = response.data.items.map(standardizeGithubProject);
+        allResults = allResults.concat(githubProjects);
+      })
+      .catch(error => {
+        console.error('Error fetching from GitHub API:', error.message);
+      })
     );
   }
 
-  res.json(filtered);
+  // 如果请求来自 Hugging Face 或所有来源
+  if (source === 'All' || source === 'Hugging Face') {
+    // 构造 Hugging Face API 请求
+    searchPromises.push(
+      axios.get(HUGGING_FACE_API_URL, {
+        params: {
+          search: `${query || ''}`,
+          sort: 'downloads',
+          limit: 50,
+        },
+      })
+      .then(response => {
+        const huggingFaceModels = response.data.map(standardizeHuggingFaceModel);
+        allResults = allResults.concat(huggingFaceModels);
+      })
+      .catch(error => {
+        console.error('Error fetching from Hugging Face API:', error.message);
+      })
+    );
+  }
+
+  // 等待所有 API 请求完成
+  await Promise.allSettled(searchPromises);
+
+  // Fuse.js 配置，用于模糊搜索
+  const options = {
+    includeScore: true,
+    keys: ['name', 'description', 'tags'],
+    threshold: 0.4, // 调整阈值以控制模糊匹配的宽松程度
+  };
+
+  const fuse = new Fuse(allResults, options);
+  let finalResults = allResults;
+
+  // 如果有搜索词，则执行模糊搜索
+  if (query) {
+    const fuseResults = fuse.search(query);
+    finalResults = fuseResults.map(result => result.item);
+  }
+
+  // 如果有标签筛选，则进行筛选
+  if (tags && tags.length > 0) {
+    const selectedTagsArray = tags.split(',');
+    finalResults = finalResults.filter(project =>
+      project.tags && project.tags.some(tag => selectedTagsArray.includes(tag))
+    );
+  }
+
+  res.json(finalResults);
 });
 
-// Serve a basic message for the root URL
-app.get('/', (req, res) => {
-  res.send('Backend server is running.');
-});
-
-// The server starts listening on the port provided by the hosting environment or a default port.
-app.listen(process.env.PORT || port, () => {
-  console.log(`Backend server running on port ${process.env.PORT || port}`);
+// 启动服务器
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
 
