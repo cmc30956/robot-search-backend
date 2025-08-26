@@ -28,7 +28,6 @@ const standardizeGithubProject = (item) => ({
   url: item.html_url,
   source: 'GitHub',
   tags: item.topics || [], // 使用 topics 作为标签
-  // 添加 stars 字段用于排序
   stars: item.stargazers_count,
 });
 
@@ -44,7 +43,6 @@ const standardizeHuggingFaceModel = (item) => ({
   url: `https://huggingface.co/${item.modelId}`,
   source: 'Hugging Face',
   tags: item.tags || [],
-  // 添加 downloads 字段用于排序
   downloads: item.downloads,
 });
 
@@ -59,13 +57,14 @@ app.get('/api/search', async (req, res) => {
 
   // 如果请求来自 GitHub 或所有来源
   if (source === 'All' || source === 'GitHub') {
-    // 构造 GitHub API 请求
+    // 构造 GitHub API 请求，使用更精确的 'topic:robotics' 过滤器
     searchPromises.push(
       axios.get(GITHUB_API_URL, {
         params: {
-          q: `robotics ${query || ''}`, // 增加 "robotics" 关键词以确保结果相关
-          sort: 'stars', // 按 star 数量排序
-          per_page: 50, // 获取更多结果以进行本地筛选
+          // 使用 'topic:robotics' 确保结果与机器人相关，同时保持用户查询
+          q: `topic:robotics ${query || ''}`,
+          sort: 'stars',
+          per_page: 50,
         },
       })
       .then(response => {
@@ -80,13 +79,15 @@ app.get('/api/search', async (req, res) => {
 
   // 如果请求来自 Hugging Face 或所有来源
   if (source === 'All' || source === 'Hugging Face') {
-    // 构造 Hugging Face API 请求
+    // 构造 Hugging Face API 请求，并使用相关的流水线标签进行过滤
     searchPromises.push(
       axios.get(HUGGING_FACE_API_URL, {
         params: {
           search: `${query || ''}`,
           sort: 'downloads',
           limit: 50,
+          // 仅搜索与机器人相关的模型类型
+          pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
         },
       })
       .then(response => {
@@ -126,9 +127,8 @@ app.get('/api/search', async (req, res) => {
     );
   }
 
-  // **新增排序逻辑：按 stars/downloads 降序排列**
+  // 按 stars/downloads 降序排列
   finalResults.sort((a, b) => {
-    // 优先按 stars (GitHub) 或 downloads (Hugging Face) 排序
     const scoreA = a.stars || a.downloads || 0;
     const scoreB = b.stars || b.downloads || 0;
     return scoreB - scoreA;
