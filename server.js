@@ -61,7 +61,7 @@ const getDateNDaysAgo = (days) => {
  * Main search API endpoint.
  */
 app.get('/api/search', async (req, res) => {
-  const { query, source, tags, sort } = req.query;
+  const { query, source, tags, sort, robotType, level } = req.query;
 
   let allResults = [];
   const searchPromises = [];
@@ -69,17 +69,57 @@ app.get('/api/search', async (req, res) => {
   const date7DaysAgo = getDateNDaysAgo(7);
   const date30DaysAgo = getDateNDaysAgo(30);
 
+  // Helper function to build the search query with all parameters
+  const getSearchQuery = (baseQuery) => {
+    let finalQuery = `${baseQuery || ''}`;
+    
+    // Add keywords based on robot type
+    if (robotType) {
+        finalQuery += ` ${robotType}`;
+    }
+
+    // Add keywords based on specific hardware/software levels
+    if (level) {
+      switch (level) {
+        case '人型机器人':
+          finalQuery += ' humanoid OR bipedal';
+          break;
+        case '移动机器人':
+          finalQuery += ' mobile-robot OR agv OR navigation';
+          break;
+        case '机械臂':
+          finalQuery += ' robotic-arm OR manipulator OR end-effector';
+          break;
+        case '灵巧手':
+          finalQuery += ' dexterous-hand OR gripper';
+          break;
+        case 'VLA模型':
+          finalQuery += ' vla-model OR vision-language-action';
+          break;
+        case 'RL模型':
+          finalQuery += ' rl-model OR reinforcement-learning';
+          break;
+        case 'LLM模型':
+          finalQuery += ' llm-model OR large-language-model';
+          break;
+        default:
+          break;
+      }
+    }
+
+    finalQuery += ` robotics`; // Always include 'robotics'
+    return finalQuery.trim();
+  };
+
   // If the request is for GitHub or all sources
   if (source === 'All' || source === 'GitHub') {
-    let githubQuery = `${query || ''} robotics`;
+    let githubQuery = getSearchQuery(query);
     let githubSort = 'stars';
 
     if (sort === 'growth_week') {
       githubQuery += ` pushed:>${date7DaysAgo}`;
     } else if (sort === 'growth_month') {
       githubQuery += ` pushed:>${date30DaysAgo}`;
-    } else if (sort === 'growth') {
-      // No date filter for general growth, just sort by stars
     }
 
     searchPromises.push(
@@ -103,7 +143,7 @@ app.get('/api/search', async (req, res) => {
   // If the request is for Hugging Face or all sources
   if (source === 'All' || source === 'Hugging Face') {
     const huggingFaceParams = {
-      search: `${query || ''}`,
+      search: getSearchQuery(query),
       limit: 50,
       pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
     };
