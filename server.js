@@ -47,6 +47,17 @@ const standardizeHuggingFaceModel = (item) => ({
 });
 
 /**
+ * Gets a date string for a given number of days ago.
+ * @param {number} days - The number of days to subtract from the current date.
+ * @returns {string} - The formatted date string (YYYY-MM-DD).
+ */
+const getDateNDaysAgo = (days) => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().split('T')[0];
+};
+
+/**
  * Main search API endpoint.
  */
 app.get('/api/search', async (req, res) => {
@@ -55,14 +66,27 @@ app.get('/api/search', async (req, res) => {
   let allResults = [];
   const searchPromises = [];
 
+  const date7DaysAgo = getDateNDaysAgo(7);
+  const date30DaysAgo = getDateNDaysAgo(30);
+
   // If the request is for GitHub or all sources
   if (source === 'All' || source === 'GitHub') {
-    // Construct the GitHub API request with a more flexible search query
+    let githubQuery = `${query || ''} robotics`;
+    let githubSort = 'stars';
+
+    if (sort === 'growth_week') {
+      githubQuery += ` pushed:>${date7DaysAgo}`;
+    } else if (sort === 'growth_month') {
+      githubQuery += ` pushed:>${date30DaysAgo}`;
+    } else if (sort === 'growth') {
+      // No date filter for general growth, just sort by stars
+    }
+
     searchPromises.push(
       axios.get(GITHUB_API_URL, {
         params: {
-          q: `${query || ''} robotics`,
-          sort: 'stars',
+          q: githubQuery,
+          sort: githubSort,
           per_page: 50,
         },
       })
@@ -78,16 +102,20 @@ app.get('/api/search', async (req, res) => {
 
   // If the request is for Hugging Face or all sources
   if (source === 'All' || source === 'Hugging Face') {
-    // Construct the Hugging Face API request with relevant pipeline tags
+    const huggingFaceParams = {
+      search: `${query || ''}`,
+      limit: 50,
+      pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
+    };
+
+    if (sort === 'growth_week' || sort === 'growth_month') {
+      huggingFaceParams.sort = 'lastUpdated';
+    } else {
+      huggingFaceParams.sort = 'downloads';
+    }
+
     searchPromises.push(
-      axios.get(HUGGING_FACE_API_URL, {
-        params: {
-          search: `${query || ''}`,
-          sort: 'downloads',
-          limit: 50,
-          pipeline_tag: 'reinforcement-learning|computer-vision|text-to-speech|automatic-speech-recognition|visual-question-answering'
-        },
-      })
+      axios.get(HUGGING_FACE_API_URL, { params: huggingFaceParams })
       .then(response => {
         const huggingFaceModels = response.data.map(standardizeHuggingFaceModel);
         allResults = allResults.concat(huggingFaceModels);
@@ -105,7 +133,7 @@ app.get('/api/search', async (req, res) => {
   const options = {
     includeScore: true,
     keys: ['name', 'description', 'tags'],
-    threshold: 0.4, // Adjust threshold for looseness of fuzzy matching
+    threshold: 0.4,
   };
 
   const fuse = new Fuse(allResults, options);
@@ -125,22 +153,12 @@ app.get('/api/search', async (req, res) => {
     );
   }
 
-  // Sort logic based on the 'sort' parameter
-  if (sort === 'growth') {
-    // A simple, efficient proxy for growth is sorting by total stars/downloads
-    finalResults.sort((a, b) => {
-      const scoreA = a.stars || a.downloads || 0;
-      const scoreB = b.stars || b.downloads || 0;
-      return scoreB - scoreA;
-    });
-  } else {
-    // Default sorting by stars/downloads in descending order
-    finalResults.sort((a, b) => {
-      const scoreA = a.stars || a.downloads || 0;
-      const scoreB = b.stars || b.downloads || 0;
-      return scoreB - scoreA;
-    });
-  }
+  // Final sort logic for all combined results
+  finalResults.sort((a, b) => {
+    const scoreA = a.stars || a.downloads || 0;
+    const scoreB = b.stars || b.downloads || 0;
+    return scoreB - scoreA;
+  });
 
   res.json(finalResults);
 });
