@@ -69,45 +69,23 @@ app.get('/api/search', async (req, res) => {
   const date7DaysAgo = getDateNDaysAgo(7);
   const date30DaysAgo = getDateNDaysAgo(30);
 
-  // Helper function to build the search query with all parameters
+  // A helper function to build the base search query for APIs
   const getSearchQuery = (baseQuery) => {
     let finalQuery = `${baseQuery || ''}`;
-    
-    // Add keywords based on specific robot types
-    if (robotType) {
-      switch (robotType) {
-        case '人型机器人':
-          finalQuery += ' humanoid OR bipedal';
-          break;
-        case '移动机器人':
-          finalQuery += ' mobile-robot OR agv OR navigation';
-          break;
-        case '机械臂':
-          finalQuery += ' robotic-arm OR manipulator OR end-effector';
-          break;
-        case '足式机器人':
-          finalQuery += ' legged-robot OR quadrupedal OR hexapod';
-          break;
-        case '灵巧手':
-          finalQuery += ' dexterous-hand OR gripper';
-          break;
-        case '桌面机器人':
-          finalQuery += ' desktop-robot OR tiny-robot';
-          break;
-        case '宠物机器人':
-          finalQuery += ' pet-robot OR companion-robot';
-          break;
-        case '教育机器人':
-          finalQuery += ' educational-robot OR teaching-robot';
-          break;
-        default:
-          // For other or 'All' types, just use the base query
-          break;
-      }
-    }
-
     finalQuery += ` robotics`; // Always include 'robotics'
     return finalQuery.trim();
+  };
+  
+  // Define a map for internal filtering keywords
+  const robotTypeKeywords = {
+    '人型机器人': ['humanoid', 'bipedal'],
+    '移动机器人': ['mobile', 'rover', 'agv', 'navigation'],
+    '机械臂': ['robotic-arm', 'manipulator', 'end-effector'],
+    '足式机器人': ['legged-robot', 'quadrupedal', 'hexapod'],
+    '灵巧手': ['dexterous-hand', 'gripper', 'manipulation'],
+    '桌面机器人': ['desktop-robot', 'tiny-robot'],
+    '宠物机器人': ['pet-robot', 'companion-robot'],
+    '教育机器人': ['educational-robot', 'teaching-robot', 'STEM'],
   };
 
   // If the request is for GitHub or all sources
@@ -168,6 +146,21 @@ app.get('/api/search', async (req, res) => {
   // Wait for all API requests to complete
   await Promise.allSettled(searchPromises);
 
+  // Apply internal filtering based on robot type keywords
+  let finalResults = allResults;
+  if (robotType && robotType !== 'All' && robotTypeKeywords[robotType]) {
+    const keywords = robotTypeKeywords[robotType];
+    const regex = new RegExp(keywords.join('|'), 'i'); // Case-insensitive regex
+    finalResults = finalResults.filter(project => {
+      // Check name, description, and tags for matching keywords
+      return (
+        (project.name && regex.test(project.name)) ||
+        (project.description && regex.test(project.description)) ||
+        (project.tags && project.tags.some(tag => regex.test(tag)))
+      );
+    });
+  }
+
   // Fuse.js configuration for fuzzy search
   const options = {
     includeScore: true,
@@ -175,8 +168,7 @@ app.get('/api/search', async (req, res) => {
     threshold: 0.4,
   };
 
-  const fuse = new Fuse(allResults, options);
-  let finalResults = allResults;
+  const fuse = new Fuse(finalResults, options);
 
   // If a search query is provided, perform fuzzy search
   if (query) {
