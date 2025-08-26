@@ -71,8 +71,8 @@ app.get('/api/search', async (req, res) => {
 
   // A helper function to build the base search query for APIs
   const getSearchQuery = (baseQuery) => {
-    let finalQuery = `${baseQuery || ''}`;
-    finalQuery += ` robotics`; // Always include 'robotics'
+    // The user's query is now the core of the search
+    let finalQuery = `${baseQuery || 'robotics'}`; // Use 'robotics' as a fallback
     return finalQuery.trim();
   };
   
@@ -145,9 +145,22 @@ app.get('/api/search', async (req, res) => {
 
   // Wait for all API requests to complete
   await Promise.allSettled(searchPromises);
-
-  // Apply internal filtering based on robot type keywords
+  
+  // Apply a local fuzzy search to the API results to better match the user's query
+  const fuseOptions = {
+    includeScore: true,
+    keys: ['name', 'description', 'tags'],
+    threshold: 0.4,
+  };
+  const fuse = new Fuse(allResults, fuseOptions);
   let finalResults = allResults;
+  
+  if (query) {
+    const fuseResults = fuse.search(query);
+    finalResults = fuseResults.map(result => result.item);
+  }
+
+  // Apply internal filtering based on robot type keywords to the filtered results
   if (robotType && robotType !== 'All' && robotTypeKeywords[robotType]) {
     const keywords = robotTypeKeywords[robotType];
     const regex = new RegExp(keywords.join('|'), 'i'); // Case-insensitive regex
@@ -161,20 +174,6 @@ app.get('/api/search', async (req, res) => {
     });
   }
 
-  // Fuse.js configuration for fuzzy search
-  const options = {
-    includeScore: true,
-    keys: ['name', 'description', 'tags'],
-    threshold: 0.4,
-  };
-
-  const fuse = new Fuse(finalResults, options);
-
-  // If a search query is provided, perform fuzzy search
-  if (query) {
-    const fuseResults = fuse.search(query);
-    finalResults = fuseResults.map(result => result.item);
-  }
 
   // If tags are provided, filter the results
   if (tags && tags.length > 0) {
