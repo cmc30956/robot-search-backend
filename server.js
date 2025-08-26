@@ -28,6 +28,8 @@ const standardizeGithubProject = (item) => ({
   url: item.html_url,
   source: 'GitHub',
   tags: item.topics || [], // 使用 topics 作为标签
+  // 添加 stars 字段用于排序
+  stars: item.stargazers_count,
 });
 
 /**
@@ -42,6 +44,8 @@ const standardizeHuggingFaceModel = (item) => ({
   url: `https://huggingface.co/${item.modelId}`,
   source: 'Hugging Face',
   tags: item.tags || [],
+  // 添加 downloads 字段用于排序
+  downloads: item.downloads,
 });
 
 /**
@@ -121,6 +125,14 @@ app.get('/api/search', async (req, res) => {
       project.tags && project.tags.some(tag => selectedTagsArray.includes(tag))
     );
   }
+
+  // **新增排序逻辑：按 stars/downloads 降序排列**
+  finalResults.sort((a, b) => {
+    // 优先按 stars (GitHub) 或 downloads (Hugging Face) 排序
+    const scoreA = a.stars || a.downloads || 0;
+    const scoreB = b.stars || b.downloads || 0;
+    return scoreB - scoreA;
+  });
 
   res.json(finalResults);
 });
