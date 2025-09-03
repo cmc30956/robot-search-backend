@@ -218,10 +218,12 @@ app.post('/api/smart-search', async (req, res) => {
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+    // 更智能的提示词，要求生成多个不同粒度的关键词
     const prompt = `
       根据以下项目描述，生成适合在 GitHub 和 Hugging Face 上搜索的关键词。
-      请以英文逗号分隔的字符串形式返回，例如: "robotics, human-robot interaction, reinforcement learning"。
-      如果描述中包含了具体的项目名称，请也包含在内。
+      请生成多个不同粒度的关键词，并以英文逗号分隔的字符串形式返回。
+      例如，对于描述“一个用于人型机器人控制的项目”，请返回类似这样的关键词：
+      "humanoid robot, robotics, humanoid, robot control, open-source robotics, artificial intelligence"
 
       描述: ${description}
     `;
