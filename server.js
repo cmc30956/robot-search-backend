@@ -3,12 +3,18 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const Fuse = require('fuse.js'); // For fuzzy searching
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Use CORS middleware to allow cross-origin requests
 app.use(cors());
+app.use(express.json());
+
+// Initialize Google Generative AI
+// This API key should be stored securely, not hardcoded in a real application.
+const genAI = new GoogleGenerativeAI(''); // Your API key will be provided automatically in the canvas environment.
 
 // GitHub API base URL
 const GITHUB_API_URL = 'https://api.github.com/search/repositories';
@@ -157,6 +163,48 @@ app.get('/api/search', async (req, res) => {
 
   res.json(finalResults);
 });
+
+// New smart search API endpoint using Gemini
+app.post('/api/smart-search', async (req, res) => {
+  const { description } = req.body;
+
+  if (!description) {
+    return res.status(400).json({ error: '描述不能为空' });
+  }
+
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const prompt = `
+      根据以下项目描述，生成适合在 GitHub 和 Hugging Face 上搜索的关键词。
+      请以英文逗号分隔的字符串形式返回，例如: "robotics, human-robot interaction, reinforcement learning"。
+      如果描述中包含了具体的项目名称，请也包含在内。
+
+      描述: ${description}
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const keywords = response.text().trim();
+
+    // Now, call the main search API with the generated keywords
+    const responseFromSearch = await axios.get(`${req.protocol}://${req.get('host')}/api/search`, {
+      params: {
+        query: keywords,
+        source: 'All', // We search all sources
+        tags: '',
+        sort: 'stars',
+      },
+    });
+
+    res.json({ keywords, results: responseFromSearch.data });
+
+  } catch (error) {
+    console.error('智能搜索失败:', error.message);
+    res.status(500).json({ error: '智能搜索失败，请重试。' });
+  }
+});
+
 
 // Start the server
 app.listen(PORT, () => {
