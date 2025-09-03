@@ -285,7 +285,25 @@ app.post('/api/smart-search', async (req, res) => {
       timeout: 15000 // 15 seconds timeout
     });
 
-    res.json({ keywords, results: responseFromSearch.data });
+    // Check if smart search with Gemini keywords yielded no results
+    if (responseFromSearch.data.length === 0) {
+      console.warn('Smart search with Gemini keywords returned no results. Falling back to original query.');
+      
+      // Perform a final search using the original user description
+      const fallbackResponse = await axios.get(`${req.protocol}://${req.get('host')}/api/search`, {
+        params: {
+          query: description,
+          source: 'All',
+          tags: '',
+          sort: 'stars',
+        },
+        timeout: 15000
+      });
+
+      res.json({ keywords: description, results: fallbackResponse.data });
+    } else {
+      res.json({ keywords, results: responseFromSearch.data });
+    }
 
   } catch (error) {
     console.error('智能搜索失败:', error.message);
