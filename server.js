@@ -250,9 +250,12 @@ app.post('/api/smart-search', async (req, res) => {
     // 更智能的提示词，要求生成多个不同粒度的关键词
     const prompt = `
       根据以下项目描述，生成适合在 GitHub 和 Hugging Face 上搜索的关键词。
+      如果描述是一个通用词，请生成多个更具体的同义词。
       请生成多个不同粒度的关键词，并以英文逗号分隔的字符串形式返回。
       例如，对于描述“一个用于人型机器人控制的项目”，请返回类似这样的关键词：
       "humanoid robot, robotics, humanoid, robot control, open-source robotics, artificial intelligence"
+      对于描述“电机”，请返回类似这样的关键词：
+      "motor, stepper motor, BLDC, servo motor, actuator"
 
       描述: ${description}
     `;
