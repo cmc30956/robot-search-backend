@@ -132,6 +132,49 @@ app.get('/api/search', async (req, res) => {
   // Wait for all API requests to complete
   await Promise.allSettled(searchPromises);
 
+  // --- 新增的健壮性检查 ---
+  if (allResults.length === 0) {
+      console.warn('Initial search returned no results. Falling back to a broader search.');
+      
+      // Clear previous results and try a broader query
+      allResults = [];
+      
+      // Try a fallback search for GitHub
+      if (source === 'All' || source === 'GitHub') {
+          try {
+              const res = await axios.get(GITHUB_API_URL, {
+                  params: {
+                      q: 'robotics',
+                      sort: 'stars',
+                      per_page: 50
+                  }
+              });
+              const githubProjects = res.data.items.map(standardizeGithubProject);
+              allResults = allResults.concat(githubProjects);
+          } catch (error) {
+              console.error('Fallback search to GitHub failed:', error.message);
+          }
+      }
+
+      // Try a fallback search for Hugging Face
+      if (source === 'All' || source === 'Hugging Face') {
+          try {
+              const res = await axios.get(HUGGING_FACE_API_URL, {
+                  params: {
+                      limit: 50,
+                      search: 'robot',
+                      sort: 'downloads'
+                  }
+              });
+              const huggingFaceModels = res.data.map(standardizeHuggingFaceModel);
+              allResults = allResults.concat(huggingFaceModels);
+          } catch (error) {
+              console.error('Fallback search to Hugging Face failed:', error.message);
+          }
+      }
+  }
+  // --- 新增部分结束 ---
+
   // Apply a local fuzzy search to the API results to better match the user's query
   const fuseOptions = {
     includeScore: true,
