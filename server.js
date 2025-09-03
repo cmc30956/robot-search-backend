@@ -13,8 +13,9 @@ app.use(cors());
 app.use(express.json());
 
 // Initialize Google Generative AI
-// This API key should be stored securely, not hardcoded in a real application.
-const genAI = new GoogleGenerativeAI(''); // Your API key will be provided automatically in the canvas environment.
+// This API key is now retrieved from an environment variable for security and deployment.
+const API_KEY = process.env.GEMINI_API_KEY; 
+const genAI = new GoogleGenerativeAI(API_KEY);
 
 // GitHub API base URL
 const GITHUB_API_URL = 'https://api.github.com/search/repositories';
@@ -213,6 +214,12 @@ app.post('/api/smart-search', async (req, res) => {
 
   if (!description) {
     return res.status(400).json({ error: '描述不能为空' });
+  }
+
+  // Check if API key is set
+  if (!API_KEY) {
+    console.error('GEMINI_API_KEY is not set in environment variables.');
+    return res.status(500).json({ error: '服务器配置错误：缺少 API 密钥。' });
   }
 
   try {
