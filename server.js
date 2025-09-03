@@ -183,9 +183,19 @@ app.post('/api/smart-search', async (req, res) => {
       描述: ${description}
     `;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const keywords = response.text().trim();
+    let keywords;
+    try {
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      keywords = response.text().trim();
+    } catch (apiError) {
+      console.error('Gemini API 调用失败:', apiError.message);
+      // Fallback to a simple keyword extraction if Gemini fails
+      keywords = description.split(' ').join(',');
+      console.log('使用回退关键词:', keywords);
+    }
+    
+    console.log('生成的关键词:', keywords);
 
     // Now, call the main search API with the generated keywords
     const responseFromSearch = await axios.get(`${req.protocol}://${req.get('host')}/api/search`, {
@@ -195,6 +205,7 @@ app.post('/api/smart-search', async (req, res) => {
         tags: '',
         sort: 'stars',
       },
+      timeout: 15000 // 15 seconds timeout
     });
 
     res.json({ keywords, results: responseFromSearch.data });
