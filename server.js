@@ -155,49 +155,6 @@ app.get('/api/search', async (req, res) => {
     }
   }, []);
 
-  // --- 新增的健壮性检查 ---
-  if (uniqueResults.length === 0) {
-      console.warn('Initial search returned no results. Falling back to a broader search.');
-      
-      // Clear previous results and try a broader query
-      allResults = [];
-      
-      // Try a fallback search for GitHub
-      if (source === 'All' || source === 'GitHub') {
-          try {
-              const res = await axios.get(GITHUB_API_URL, {
-                  params: {
-                      q: 'robotics',
-                      sort: 'stars',
-                      per_page: 50
-                  }
-              });
-              const githubProjects = res.data.items.map(standardizeGithubProject);
-              allResults = allResults.concat(githubProjects);
-          } catch (error) {
-              console.error('Fallback search to GitHub failed:', error.message);
-          }
-      }
-
-      // Try a fallback search for Hugging Face
-      if (source === 'All' || source === 'Hugging Face') {
-          try {
-              const res = await axios.get(HUGGING_FACE_API_URL, {
-                  params: {
-                      limit: 50,
-                      search: 'robot',
-                      sort: 'downloads'
-                  }
-              });
-              const huggingFaceModels = res.data.map(standardizeHuggingFaceModel);
-              allResults = allResults.concat(huggingFaceModels);
-          } catch (error) {
-              console.error('Fallback search to Hugging Face failed:', error.message);
-          }
-      }
-  }
-  // --- 新增部分结束 ---
-
   // Apply a local fuzzy search to the API results to better match the user's query
   const fuseOptions = {
     includeScore: true,
@@ -244,35 +201,39 @@ app.post('/api/smart-search', async (req, res) => {
     return res.status(500).json({ error: '服务器配置错误：缺少 API 密钥。' });
   }
 
+  let finalResults = [];
+  let suggestedKeywords = [];
+  let keywords = description;
+
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // 更智能的提示词，要求生成多个不同粒度的关键词
-    const prompt = `
-      根据以下项目描述，生成适合在 GitHub 和 Hugging Face 上搜索的关键词。
-      如果描述是一个通用词，请生成多个更具体的同义词。
-      请生成多个不同粒度的关键词，并以英文逗号分隔的字符串形式返回。
-      例如，对于描述“一个用于人型机器人控制的项目”，请返回类似这样的关键词：
+    // A prompt to generate a list of keywords from a natural language description.
+    const searchPrompt = `
+      Based on the following project description, generate keywords suitable for searching on GitHub and Hugging Face.
+      If the description is a single, broad term, generate several more specific synonyms.
+      Generate multiple keywords of varying specificity, and return them as a single comma-separated English string.
+      For example, for the description "A project for controlling a humanoid robot", return keywords like:
       "humanoid robot, robotics, humanoid, robot control, open-source robotics, artificial intelligence"
-      对于描述“电机”，请返回类似这样的关键词：
+      For the description "motor", return keywords like:
       "motor, stepper motor, BLDC, servo motor, actuator"
+      For the description "人形机器人", return keywords like:
+      "humanoid robot, humanoid, robotics, robot"
 
-      描述: ${description}
+      Description: ${description}
     `;
 
-    let keywords;
     try {
-      const result = await model.generateContent(prompt);
+      const result = await model.generateContent(searchPrompt);
       const response = result.response;
       keywords = response.text().trim();
     } catch (apiError) {
-      console.error('Gemini API 调用失败:', apiError.message);
-      // Fallback to a simple keyword extraction if Gemini fails
-      keywords = description.split(' ').join(',');
-      console.log('使用回退关键词:', keywords);
+      console.error('Gemini API call failed:', apiError.message);
+      keywords = description; // Fallback to original description if Gemini fails
+      console.log('Using fallback keywords:', keywords);
     }
     
-    console.log('生成的关键词:', keywords);
+    console.log('Generated keywords:', keywords);
 
     // Now, call the main search API with the generated keywords
     const responseFromSearch = await axios.get(`${req.protocol}://${req.get('host')}/api/search`, {
@@ -285,11 +246,12 @@ app.post('/api/smart-search', async (req, res) => {
       timeout: 15000 // 15 seconds timeout
     });
 
-    // Check if smart search with Gemini keywords yielded no results
-    if (responseFromSearch.data.length === 0) {
+    finalResults = responseFromSearch.data;
+
+    // If smart search with Gemini keywords yielded no results, fall back to the original query
+    if (finalResults.length === 0) {
       console.warn('Smart search with Gemini keywords returned no results. Falling back to original query.');
       
-      // Perform a final search using the original user description
       const fallbackResponse = await axios.get(`${req.protocol}://${req.get('host')}/api/search`, {
         params: {
           query: description,
@@ -299,15 +261,31 @@ app.post('/api/smart-search', async (req, res) => {
         },
         timeout: 15000
       });
-
-      res.json({ keywords: description, results: fallbackResponse.data });
-    } else {
-      res.json({ keywords, results: responseFromSearch.data });
+      finalResults = fallbackResponse.data;
     }
 
+    // Now, generate related keywords based on the final results for interactive search
+    if (finalResults.length > 0) {
+      const searchResultString = finalResults.slice(0, 5).map(item => `${item.name}: ${item.tags.join(', ')}`).join('; ');
+      const suggestionPrompt = `
+        Based on the following search results, generate 3-5 more specific, related English search keywords, separated by commas. Do not include the original query terms.
+        Example search results: "${searchResultString}"
+      `;
+
+      try {
+        const suggestionResult = await model.generateContent(suggestionPrompt);
+        const suggestionResponse = suggestionResult.response;
+        suggestedKeywords = suggestionResponse.text().trim().split(',').map(kw => kw.trim());
+      } catch (suggestionError) {
+        console.error('Gemini API failed to generate suggestions:', suggestionError.message);
+      }
+    }
+    
+    res.json({ keywords: keywords, results: finalResults, suggestions: suggestedKeywords });
+
   } catch (error) {
-    console.error('智能搜索失败:', error.message);
-    res.status(500).json({ error: '智能搜索失败，请重试。' });
+    console.error('Smart search failed:', error.message);
+    res.status(500).json({ error: 'Smart search failed, please try again.' });
   }
 });
 
