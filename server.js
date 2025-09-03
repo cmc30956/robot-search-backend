@@ -87,22 +87,26 @@ app.get('/api/search', async (req, res) => {
       githubQuery += ` pushed:>${date30DaysAgo}`;
     }
 
-    searchPromises.push(
-      axios.get(GITHUB_API_URL, {
-        params: {
-          q: githubQuery,
-          sort: githubSort,
-          per_page: 50,
-        },
-      })
-      .then(response => {
-        const githubProjects = response.data.items.map(standardizeGithubProject);
-        allResults = allResults.concat(githubProjects);
-      })
-      .catch(error => {
-        console.error('Error fetching from GitHub API:', error.message);
-      })
-    );
+    // Split the query into multiple keywords and create a promise for each search
+    const keywords = githubQuery.split(',');
+    for (const keyword of keywords) {
+      searchPromises.push(
+        axios.get(GITHUB_API_URL, {
+          params: {
+            q: keyword.trim(),
+            sort: githubSort,
+            per_page: 50,
+          },
+        })
+        .then(response => {
+          const githubProjects = response.data.items.map(standardizeGithubProject);
+          allResults = allResults.concat(githubProjects);
+        })
+        .catch(error => {
+          console.error(`Error fetching from GitHub API for keyword "${keyword.trim()}":`, error.message);
+        })
+      );
+    }
   }
 
   // If the request is for Hugging Face or all sources
@@ -118,23 +122,41 @@ app.get('/api/search', async (req, res) => {
       huggingFaceParams.sort = 'downloads';
     }
 
-    searchPromises.push(
-      axios.get(HUGGING_FACE_API_URL, { params: huggingFaceParams })
-      .then(response => {
-        const huggingFaceModels = response.data.map(standardizeHuggingFaceModel);
-        allResults = allResults.concat(huggingFaceModels);
-      })
-      .catch(error => {
-        console.error('Error fetching from Hugging Face API:', error.message);
-      })
-    );
+    // Split the query into multiple keywords and create a promise for each search
+    const keywords = huggingFaceParams.search.split(',');
+    for (const keyword of keywords) {
+      const singleSearchParams = {
+        ...huggingFaceParams,
+        search: keyword.trim(),
+      };
+      searchPromises.push(
+        axios.get(HUGGING_FACE_API_URL, { params: singleSearchParams })
+        .then(response => {
+          const huggingFaceModels = response.data.map(standardizeHuggingFaceModel);
+          allResults = allResults.concat(huggingFaceModels);
+        })
+        .catch(error => {
+          console.error(`Error fetching from Hugging Face API for keyword "${keyword.trim()}":`, error.message);
+        })
+      );
+    }
   }
 
   // Wait for all API requests to complete
   await Promise.allSettled(searchPromises);
 
+  // Remove duplicates from the results
+  const uniqueResults = allResults.reduce((acc, current) => {
+    const x = acc.find(item => item.id === current.id && item.source === current.source);
+    if (!x) {
+      return acc.concat([current]);
+    } else {
+      return acc;
+    }
+  }, []);
+
   // --- 新增的健壮性检查 ---
-  if (allResults.length === 0) {
+  if (uniqueResults.length === 0) {
       console.warn('Initial search returned no results. Falling back to a broader search.');
       
       // Clear previous results and try a broader query
@@ -182,8 +204,8 @@ app.get('/api/search', async (req, res) => {
     keys: ['name', 'description', 'tags'],
     threshold: 0.4,
   };
-  const fuse = new Fuse(allResults, fuseOptions);
-  let finalResults = allResults;
+  const fuse = new Fuse(uniqueResults, fuseOptions);
+  let finalResults = uniqueResults;
 
   if (query) {
     const fuseResults = fuse.search(query);
@@ -238,7 +260,7 @@ app.post('/api/smart-search', async (req, res) => {
     let keywords;
     try {
       const result = await model.generateContent(prompt);
-      const response = await result.response;
+      const response = result.response;
       keywords = response.text().trim();
     } catch (apiError) {
       console.error('Gemini API 调用失败:', apiError.message);
